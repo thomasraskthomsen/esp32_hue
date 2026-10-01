@@ -1,0 +1,8 @@
+# Flash layout of the 16 MB flash. The app gets 4 MB (it needs about 1 MB);
+# `settings` holds the WiFi credentials set over the serial console. The rest
+# is free.
+# Name,   Type, SubType,   Offset,   Size
+nvs,      data, nvs,       0x9000,   0x6000,
+phy_init, data, phy,       0xf000,   0x1000,
+factory,  app,  factory,   0x10000,  0x400000,
+settings, data, undefined, 0x410000, 0x10000,

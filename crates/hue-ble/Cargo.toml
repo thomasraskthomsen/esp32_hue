@@ -1,0 +1,16 @@
+[package]
+description  = "Control Philips Hue Bluetooth lights from a BLE central, on trouble-host"
+edition.workspace      = true
+license.workspace      = true
+name         = "hue-ble"
+rust-version.workspace = true
+version.workspace      = true
+
+[dependencies]
+bt-hci          = { workspace = true }
+embassy-futures = { workspace = true }
+embassy-sync    = { workspace = true }
+embassy-time    = { workspace = true }
+heapless        = { workspace = true }
+log             = { workspace = true }
+trouble-host    = { workspace = true }

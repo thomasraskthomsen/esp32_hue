@@ -1,0 +1,10 @@
+[package]
+edition = "2024"
+name    = "fontgen"
+version = "0.1.0"
+publish = false
+
+[dependencies]
+ab_glyph = "0.2"
+
+[workspace]

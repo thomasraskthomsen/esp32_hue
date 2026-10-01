@@ -1,0 +1,84 @@
+[package]
+edition.workspace      = true
+license.workspace      = true
+name         = "tdongle"
+rust-version.workspace = true
+version.workspace      = true
+
+[[bin]]
+name = "tdongle"
+path = "./src/main.rs"
+
+[dependencies]
+hue-ble = { path = "../hue-ble" }
+
+esp-hal = { version = "~1.2", features = ["esp32s3", "log-04", "unstable"] }
+
+esp-rtos = { version = "0.4.0", features = [
+  "embassy",
+  "esp-alloc",
+  "esp-radio",
+  "esp32s3",
+  "log-04",
+] }
+
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3", "log-04"] }
+log                    = { workspace = true }
+
+embassy-executor = { version = "0.10.0", features = ["log"] }
+embassy-net = { version = "0.8.0", features = [
+  "dhcpv4",
+  "dhcpv4-hostname",
+  "dns",
+  "log",
+  "medium-ethernet",
+  "tcp",
+  "udp",
+] }
+embassy-time = { workspace = true }
+esp-alloc = "0.11.0"
+# The first esp-radio for esp-hal 1.2; beta.2 was yanked.
+esp-radio = { version = "=1.0.0-beta.1", features = [
+  "esp-alloc",
+  "esp32s3",
+  "log-04",
+  "unstable",
+  "wifi",
+  "ble",
+  "coex",
+] }
+trouble-host    = { workspace = true }
+embassy-futures = { workspace = true }
+heapless        = { workspace = true }
+smoltcp = { version = "0.12.0", default-features = false, features = [
+  "log",
+  "medium-ethernet",
+  "multicast",
+  "proto-dhcpv4",
+  "proto-dns",
+  "proto-ipv4",
+  "socket-dns",
+  "socket-icmp",
+  "socket-raw",
+  "socket-tcp",
+  "socket-udp",
+] }
+static_cell = { workspace = true }
+# Low-level flash access for saving settings step by step (src/settings.rs).
+esp-storage = "0.10.0"
+
+critical-section = "1.2.0"
+esp-backtrace = { version = "0.20.0", features = [
+  "esp32s3",
+  "panic-handler",
+  "println",
+] }
+# `timestamp`: milliseconds since boot in front of every log line.
+esp-println = { version = "0.18.0", features = ["esp32s3", "log-04", "timestamp"] }
+mipidsi = "0.10"
+embedded-graphics = "0.8"
+# Seven-segment digits for the clock.
+eg-seven-segment = "0.2"
+embedded-hal-bus = "0.3"
+embassy-sync = { workspace = true }
+embedded-io-async = "0.7"

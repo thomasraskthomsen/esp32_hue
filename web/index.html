@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Light schedule</title>
+<style>
+  :root { --bg:#ffffff; --card:#f2f3f6; --fg:#1d2029; --dim:#6b7285; --acc:#f59e0b; --off:#c3c8d4; --bad:#d93a3a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; margin:0; overflow:hidden; }
+  body { background:var(--bg); color:var(--fg); font:15px/1.3 system-ui,sans-serif; display:flex; flex-direction:row-reverse; height:100dvh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  #bar { display:flex; flex-direction:column; align-items:stretch; gap:10px; width:84px; padding:10px 8px; background:var(--card); flex:none; text-align:center; }
+  #bar button { min-height:48px; padding:0 4px; }
+  #bar .sp { flex:1; min-width:0; font-size:12px; }
+  #err { color:var(--bad); }
+  #msg { color:var(--acc); }
+  button { font:inherit; color:var(--fg); background:#e3e6ed; border:0; border-radius:10px; padding:0 14px; min-height:40px; }
+  button.primary { background:var(--acc); color:#1a1200; font-weight:600; }
+  button:disabled { opacity:.35; }
+  .switch { position:relative; width:46px; height:26px; flex:none; }
+  .switch input { opacity:0; position:absolute; inset:0; width:100%; height:100%; margin:0; z-index:1; }
+  .switch span { position:absolute; inset:0; background:var(--off); border-radius:13px; transition:.15s; }
+  .switch span::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px #0004; transition:.15s; }
+  .switch input:checked + span { background:var(--acc); }
+  .switch input:checked + span::after { transform:translateX(20px); }
+  #stage { position:relative; flex:1; min-height:0; touch-action:none; user-select:none; -webkit-user-select:none; }
+  #g { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #tools { margin:auto 0; display:flex; flex-direction:column; align-items:center; gap:6px; background:#fff; border:1px solid #d5d9e2; border-radius:12px; padding:6px 4px; opacity:.35; pointer-events:none; transition:opacity .15s; }
+  #tools.active { opacity:1; pointer-events:auto; }
+  #tools b { font-weight:600; font-size:13px; }
+  #tools button { width:100%; min-height:40px; padding:0; font-size:18px; }
+  #tools button.on { background:var(--acc); color:#1a1200; }
+  /* Portrait: the chart on top, the buttons in a row below it. */
+  @media (orientation:portrait) {
+    body { flex-direction:column-reverse; }
+    #bar { position:relative; flex-direction:row; align-items:center; width:auto; padding:8px 10px; }
+    #bar button { padding:0 14px; }
+    #tools { margin:0 auto; flex-direction:row; padding:4px 8px; }
+    #tools button { width:44px; }
+    #bar .sp { position:absolute; left:10px; right:10px; bottom:calc(100% + 2px); pointer-events:none; text-align:left; }
+  }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="add">+ Add</button>
+  <div id="tools"><b id="info">&nbsp;</b><button id="forced" title="Forced">&#9873;</button><button id="del" title="Delete">&#10005;</button></div>
+  <span class="sp"><span id="err"></span><span id="msg"></span></span>
+  <button id="save" class="primary">Save</button>
+</div>
+<div id="stage">
+  <svg id="g"></svg>
+</div>
+
+<script>
+"use strict";
+const MAX = 8, MIN = 2, DAY = 1440, OFF_FRAC = .14;
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+
+// ---- Backend (mock). Replace with fetch('/api/schedule') GET / PUT later. ----
+const DEFAULT = { automate:false, entries:[
+  { minute:6*60+30, dim:60,   forced:false },
+  { minute:8*60,    dim:200,  forced:false },
+  { minute:16*60,   dim:254,  forced:false },
+  { minute:21*60,   dim:90,   forced:false },
+  { minute:23*60,   dim:null, forced:true  },
+]};
+// On the dongle these use /api/schedule; opened from anywhere else they fall back to localStorage.
+async function load() {
+  try {
+    const r = await fetch("/api/schedule", { cache:"no-store" });
+    if (r.ok) return await r.json();
+  } catch (e) {}
+  const s = localStorage.getItem("schedule");
+  return s ? JSON.parse(s) : structuredClone(DEFAULT);
+}
+async function save(data) {
+  try {
+    const r = await fetch("/api/schedule", { method:"PUT", body:JSON.stringify(data) });
+    if (r.ok) return;
+    if (r.status !== 404) throw new Error(await r.text() || r.status);
+  } catch (e) { if (e instanceof Error && e.message !== "Failed to fetch") throw e; }
+  localStorage.setItem("schedule", JSON.stringify(data));
+}
+
+// ---- Model ----
+let st = { automate:false, entries:[] };
+let sel = 0;
+
+const fmt = m => String(Math.floor(m/60)).padStart(2,"0") + ":" + String(m%60).padStart(2,"0");
+const pct = d => d === null ? "off" : Math.round(d/254*100) + "%";
+
+function validate() {
+  const e = st.entries;
+  if (e.length > MAX) return `At most ${MAX} entries.`;
+  if (e.length < MIN) return `Need at least ${MIN} entries.`;
+  if (new Set(e.map(x => x.minute)).size !== e.length) return "Two entries share a time.";
+  return "";
+}
+function sortKeep() {
+  const cur = st.entries[sel];
+  st.entries.sort((a,b) => a.minute - b.minute);
+  sel = st.entries.indexOf(cur);
+}
+
+// ---- Geometry ----
+const ML = 40, MR = 14, MT = 14, MB = 24;
+let W = 0, H = 0;
+const plotW = () => W - ML - MR;
+const plotH = () => H - MT - MB;
+const dimH = () => plotH() * (1 - OFF_FRAC);
+const xOf = m => ML + m / DAY * plotW();
+const yOf = d => d === null ? MT + dimH() + plotH() * OFF_FRAC / 2 : MT + (1 - (d - 1) / 253) * dimH();
+const SNAP = 5;
+const minOf = x => Math.min(DAY - SNAP, Math.max(0, Math.round((x - ML) / plotW() * DAY / SNAP) * SNAP));
+const dimOf = y => y > MT + dimH() ? null : Math.min(254, Math.max(1, Math.round(1 + (1 - (y - MT) / dimH()) * 253)));
+
+// ---- Render ----
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  parent.appendChild(n); return n;
+}
+function render() {
+  const g = $("g");
+  const r = $("stage").getBoundingClientRect(); W = r.width; H = r.height;
+  g.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  g.innerHTML = "";
+  const e = st.entries;
+
+  // off band and grid
+  const bandY = MT + dimH();
+  el("rect", { x:ML, y:bandY, width:plotW(), height:plotH()*OFF_FRAC, fill:"#eceef3" }, g);
+  el("line", { x1:ML, x2:W-MR, y1:bandY, y2:bandY, stroke:"#9aa1b3", "stroke-dasharray":"5 4" }, g);
+  const t = el("text", { x:ML-6, y:yOf(null)+4, fill:"#6b7285", "font-size":11, "text-anchor":"end" }, g); t.textContent = "off";
+  for (const p of [25, 50, 75, 100]) {
+    const y = yOf(Math.round(p/100*254));
+    el("line", { x1:ML, x2:W-MR, y1:y, y2:y, stroke:"#e6e8ee" }, g);
+    const l = el("text", { x:ML-6, y:y+4, fill:"#6b7285", "font-size":11, "text-anchor":"end" }, g); l.textContent = p + "%";
+  }
+  for (let h = 0; h <= 24; h += 3) {
+    const x = xOf(h * 60);
+    el("line", { x1:x, x2:x, y1:MT, y2:MT+plotH(), stroke:"#e6e8ee" }, g);
+    const l = el("text", { x, y:H-7, fill:"#6b7285", "font-size":11, "text-anchor":"middle" }, g); l.textContent = String(h).padStart(2,"0");
+  }
+
+  // step line: each level runs to the next entry; the last wraps past midnight to the first
+  if (e.length) {
+    let d = "";
+    const first = e[0], last = e[e.length-1];
+    d += `M ${xOf(0)} ${yOf(last.dim)} H ${xOf(first.minute)}`;
+    e.forEach((x,i) => {
+      d += ` V ${yOf(x.dim)}`;
+      d += ` H ${xOf(i+1 < e.length ? e[i+1].minute : DAY)}`;
+    });
+    el("path", { d, fill:"none", stroke:"#f59e0b", "stroke-width":3, "stroke-linejoin":"round" }, g);
+    // fill under the lit part
+    el("path", { d: d + ` V ${bandY} H ${xOf(0)} Z`, fill:"#f59e0b26", stroke:"none" }, g);
+  }
+
+  const now = new Date(), nm = now.getHours()*60 + now.getMinutes();
+  el("line", { x1:xOf(nm), x2:xOf(nm), y1:MT, y2:MT+plotH(), stroke:"#1d2029", "stroke-opacity":.45, "stroke-dasharray":"2 3" }, g);
+
+  e.forEach((x,i) => {
+    const cx = xOf(x.minute), cy = yOf(x.dim);
+    const c = el("g", { "data-i":i, style:"cursor:grab" }, g);
+    el("circle", { cx, cy, r:26, fill:"transparent" }, c);               // big touch target
+    el("circle", { cx, cy, r:i===sel?12:9, fill:x.dim===null?"#8a92a6":"#f59e0b",
+                   stroke:i===sel?"#1d2029":"#fff", "stroke-width":i===sel?3:2 }, c);
+    if (x.forced) el("circle", { cx, cy, r:i===sel?18:15, fill:"none", stroke:"#f59e0b", "stroke-width":2, "stroke-dasharray":"3 3" }, c);
+  });
+
+  placeTools();
+  $("err").textContent = validate();
+}
+
+function placeTools() {
+  const x = st.entries[sel];
+  $("tools").classList.toggle("active", !!x);
+  $("info").innerHTML = x ? `${fmt(x.minute)}<br>${pct(x.dim)}` : "&nbsp;<br>&nbsp;";
+  $("forced").classList.toggle("on", !!x && x.forced);
+  $("del").disabled = !x || st.entries.length <= MIN;
+}
+
+// ---- Interaction ----
+$("g").addEventListener("pointerdown", ev => {
+  const n = ev.target.closest("[data-i]");
+  if (!n) { sel = -1; render(); return; }
+  sel = +n.dataset.i;
+  const cur = st.entries[sel], g = $("g");
+  const r = g.getBoundingClientRect();
+  const offX = ev.clientX - r.left - xOf(cur.minute), offY = ev.clientY - r.top - yOf(cur.dim);
+  g.setPointerCapture(ev.pointerId);
+  const move = e2 => {
+    const m = minOf(e2.clientX - r.left - offX);
+    if (!st.entries.some(o => o !== cur && o.minute === m)) cur.minute = m;
+    cur.dim = dimOf(e2.clientY - r.top - offY);
+    sortKeep(); render();
+  };
+  const up = () => { g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); g.removeEventListener("pointercancel", up); };
+  g.addEventListener("pointermove", move); g.addEventListener("pointerup", up); g.addEventListener("pointercancel", up);
+  render();
+});
+
+$("forced").onclick = () => { const x = st.entries[sel]; if (x) { x.forced = !x.forced; render(); } };
+$("del").onclick = () => {
+  if (st.entries.length <= MIN) return;
+  st.entries.splice(sel, 1); sel = -1; render();
+};
+
+$("add").onclick = () => {
+  const e = st.entries;
+  if (e.length >= MAX) { $("err").textContent = `At most ${MAX} entries.`; return; }
+  // middle of the largest gap
+  let best = 12*60, gap = -1;
+  e.forEach((x,i) => {
+    const nx = e[(i+1) % e.length].minute, d = ((nx - x.minute + DAY - 1) % DAY) + 1;
+    if (d > gap) { gap = d; best = (x.minute + Math.floor(d/2)) % DAY; }
+  });
+  while (e.some(x => x.minute === best)) best = (best + 1) % DAY;
+  const n = { minute:best, dim:200, forced:false }; e.push(n); sortKeep(); sel = e.indexOf(n); render();
+};
+
+$("save").onclick = async () => {
+  const err = validate(); $("err").textContent = err; if (err) return;
+  try { await save(st); $("msg").textContent = "Saved"; } catch (e) { $("err").textContent = "Save failed: " + e; }
+  setTimeout(() => $("msg").textContent = "", 2000);
+};
+
+addEventListener("resize", render);
+
+load().then(d => { st = d; sel = -1; render(); });
+</script>
+</body>
+</html>
